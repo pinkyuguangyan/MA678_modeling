@@ -1,0 +1,521 @@
+---
+title: "Homework 02"
+author: "Guangyan Yu"
+date: "Septemeber 21, 2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+\newcommand{\mat}[1]{\boldsymbol{#1}} 
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\rv}[1]{\underline{#1}}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,dev="CairoPNG",fig.align = "center", 
+                      fig.width = 5.656, fig.height = 4, global.par = TRUE)
+pacman::p_load("arm","data.table","Cairo","faraway","foreign","ggplot2","knitr")
+par (mar=c(3,3,2,1), mgp=c(2,.7,0), tck=-.01)
+```
+
+# Introduction 
+In homework 2 you will fit many regression models.  You are welcome to explore beyond what the question is asking you.  
+
+Please come see us we are here to help.
+
+## Data analysis 
+
+### Analysis of earnings and height data
+
+The folder `earnings` has data from the Work, Family, and Well-Being Survey (Ross, 1990).
+You can find the codebook at http://www.stat.columbia.edu/~gelman/arm/examples/earnings/wfwcodebook.txt
+```{r}
+gelman_dir <- "http://www.stat.columbia.edu/~gelman/arm/examples/"
+heights    <- read.dta (paste0(gelman_dir,"earnings/heights.dta"))
+```
+
+Pull out the data on earnings, sex, height, and weight.
+
+1. In R, check the dataset and clean any unusually coded data.
+
+```{r}
+#Remove NA
+heights_new<-na.omit(heights)
+rownames(heights_new)<-seq(1,nrow(heights_new))
+#Remove earning=0
+zero<-which(heights_new$earn==0)
+heights_new<-heights_new[-zero,]
+#Remove outliers by clustering(kmeans)
+set.seed(12)
+km = kmeans(heights_new,center=3)
+r = nrow(heights_new)
+c = ncol(heights_new)
+#distance
+x1=matrix(km$centers[1,],nrow=r,ncol=c,byrow=T)
+juli1=sqrt(rowSums((heights_new-x1)^2))
+x2=matrix(km$centers[2,],nrow=r,ncol=c,byrow=T)
+juli2=sqrt(rowSums((heights_new-x2)^2))
+x3=matrix(km$centers[3,],nrow=r,ncol=c,byrow=T)
+juli3=sqrt(rowSums((heights_new-x3)^2))
+dist=data.frame(juli1,juli2,juli3)
+#minimum of distance
+y=apply(dist,1,min)
+y_new<-sort(y)
+q<-y_new[ceiling(r*0.8)]
+
+sub<-which(y>q)
+heights_nn <- heights_new[-sub,]
+
+```
+
+2. Fit a linear regression model predicting earnings from height. What transformation should you perform in order to interpret the intercept from this model
+as average earnings for people with average height?
+
+```{r}
+y <- heights_nn$earn
+x <- heights_nn$height
+model<-lm(y~x)
+summary(model)
+```
+*We should centering the earnings and heights*
+
+3. Fit some regression models with the goal of predicting earnings from some
+combination of sex, height, and weight. Be sure to try various transformations and interactions that might make sense. Choose your preferred model and justify.
+
+```{r}
+sex<-heights_nn$sex
+earning<-heights_nn$earn
+height<-heights_nn$height
+#log
+model1<-lm(log(earning+1)~sex+height)
+summary(model1)
+model2<-lm(log(earning+1)~sex*height)
+summary(model2)
+#pyth_gp<-ggplot(model1)
+#pyth_gp + aes(x=sex+height+race,earning) + geom_point() + stat_smooth(method = "lm",col = "red")
+plot(model1,which=1)
+plot(model2,which=1)
+#zscore
+earning_z<-(earning-mean(earning))/sd(earning)
+height_z<-(height-mean(height))/sd(height)
+model3<-lm(earning_z~sex+height_z)
+model4<-lm(earning_z~sex*height_z)
+summary(model3)
+summary(model4)
+plot(model3,which=1)
+plot(model4,which=1)
+```
+*I think model3 is the best, which is* $earning\_z=0.756-0.473*sex+0.059*height\_z$. *Because* $R^2$*of this model is the biggest one, and the residual plot indicate that the residuals spread evenly on both sides of 0*
+
+4. Interpret all model coefficients.
+
+*In model3, the regression function is* $earning\_z=0.756-0.473*sex+0.059*height\_z$
+
+*When a woman has the average height and race=0, her earning is 0.756 more than the average earning.*
+
+*At same condition, a man's earning is* $0.473*sd(earning)$ *less than a woman*
+
+*With height increases 1 sd(height), earning increases* $0.059*sd(earning)$
+
+5. Construct 95% confidence interval for all model coefficients and discuss what they mean.
+
+```{r}
+confint(model3,level = 0.95)
+```
+*[0.47,1.04] contains the true intercept with 95% probability*
+
+
+*[-0.648,-0.298] contains the true coefficient of sex with 95% probability*
+
+*[-0.026,0.145] contains the true coefficient of height_z with 95% probability*
+
+### Analysis of mortality rates and various environmental factors
+
+The folder `pollution` contains mortality rates and various environmental factors from 60 U.S. metropolitan areas from McDonald, G.C. and Schwing, R.C. (1973) 'Instabilities of regression estimates relating air pollution to mortality', Technometrics, vol.15, 463-482. 
+
+Variables, in order:
+
+* PREC   Average annual precipitation in inches
+* JANT   Average January temperature in degrees F
+* JULT   Same for July
+* OVR65  % of 1960 SMSA population aged 65 or older
+* POPN   Average household size
+* EDUC   Median school years completed by those over 22
+* HOUS   % of housing units which are sound & with all facilities
+* DENS   Population per sq. mile in urbanized areas, 1960
+* NONW   % non-white population in urbanized areas, 1960
+* WWDRK  % employed in white collar occupations
+* POOR   % of families with income < $3000
+* HC     Relative hydrocarbon pollution potential
+* NOX    Same for nitric oxides
+* SO@    Same for sulphur dioxide
+* HUMID  Annual average % relative humidity at 1pm
+* MORT   Total age-adjusted mortality rate per 100,000
+
+For this exercise we shall model mortality rate given nitric oxides, sulfur dioxide, and hydrocarbons as inputs. This model is an extreme oversimplification as it combines all sources of mortality and does not adjust for crucial factors such as age and smoking. We use it to illustrate log transformations in regression.
+
+```{r}
+gelman_dir   <- "http://www.stat.columbia.edu/~gelman/arm/examples/"
+pollution    <- read.dta (paste0(gelman_dir,"pollution/pollution.dta"))
+```
+
+1. Create a scatterplot of mortality rate versus level of nitric oxides. Do you think linear regression will fit these data well? Fit the regression and evaluate a residual plot from the regression.
+
+```{r}
+mort<-pollution$mort
+nox<-pollution$nox
+plot(x=nox,y=mort)
+model<-lm(mort~nox)
+plot(model,which=1)
+```
+*It will not fit well, because the data has right-skewness*
+*The residuals are not evenly distrbuted in the plot, so that the regression does not fit well.*
+
+2. Find an appropriate transformation that will result in data more appropriate for linear regression. Fit a regression to the transformed data and evaluate the new residual plot.
+
+```{r}
+y<-mort
+x<-log(nox)
+plot(x,y)
+model<-lm(y~x)
+plot(model,which=1)
+
+```
+*In this case, the residuals evenly distributed on both sides of 0 in the plot, so that the regression is more appropriate*
+3. Interpret the slope coefficient from the model you chose in 2.
+
+```{r}
+summary(model)
+```
+*The regression function is *$mort = 904.724*15.335*log(nox)$
+*If x times 2, exp(y) will times $2^{15.335}$*
+4. Construct 99% confidence interval for slope coefficient from the model you chose in 2 and interpret them.
+
+```{r}
+confint(model,level = 0.99)
+```
+*[-2.231,32.902] contains the true slop of log(nox) with 99% probability*
+
+5. Now fit a model predicting mortality rate using levels of nitric oxides, sulfur dioxide, and hydrocarbons as inputs. Use appropriate transformations when
+helpful. Plot the fitted regression model and interpret the coefficients.
+
+```{r}
+so2<-pollution$so2
+hc<-pollution$hc
+model<-lm(mort~log(nox)+log(so2)+log(hc))
+summary(model)
+library(ggplot2)
+pyth_gp<-ggplot(model)
+pyth_gp + aes(x=log(nox)+log(so2)+log(hc),mort) + geom_point() + stat_smooth(method = "lm",col = "red")
+```
+*The regression function is*$mort = 924.965+58.336*log(nox)+11.762*log(so2)-57.3*log(hc)$
+
+*When nox=so2=hc=1,mort=924.965*
+
+*When log(nox) or log(so2) or log(hc) increases 1 unit, mort will increase 1 unit*
+
+6. Cross-validate: fit the model you chose above to the first half of the data and then predict for the second half. (You used all the data to construct the model in 4, so this is not really cross-validation, but it gives a sense of how the steps of cross-validation can be implemented.)
+
+```{r}
+set.seed(10)
+index<-sample(nrow(pollution), 0.5*nrow(pollution),replace=F)
+data1<-pollution[index,]
+data2<-pollution[-index,]
+model<-lm(mort~log(nox)+log(so2)+log(hc),data=data1)
+coef<-model$coefficients
+pred<-coef[1]+coef[2]*log(data2$nox)+coef[3]*log(data2$so2)+coef[4]*log(data2$hc)
+residual<-pred-data2$mort
+plot(x=pred,y=residual)
+abline(a=0,b=0)
+```
+*The residual plot show that except one point, other residuals are evenly distributed on both sides of 0*
+
+### Study of teenage gambling in Britain
+
+```{r,message =FALSE}
+data(teengamb)
+?teengamb
+```
+
+1. Fit a linear regression model with gamble as the response and the other variables as predictors and interpret the coefficients. Make sure you rename and transform the variables to improve the interpretability of your regression model.
+
+```{r}
+gamble_log<-log(teengamb$gamble+1)
+sex<-teengamb$sex
+status_center<-(teengamb$status-mean(teengamb$status))/sd(teengamb$status)
+income<-teengamb$income
+verbal<-teengamb$verbal
+model<-lm(gamble_log~sex+status_center+income+verbal)
+summary(model)
+```
+*The regression function is* $gamble\_log = 3.06554-0.87120sex+0.51496status\_center+0.215654income-0.26165verbal$
+*At the same condition, a male spends exp(-0.871) times that of a female on gambling in pounds per year*
+
+*A female with average status and 0 income per week and 0 verbal score spends exp(3.066) in pounds on gambling per year.*
+
+*With socioeconomic status score increasing one unit, the expenditure on gambling in pounds per year times exp(0.515)*
+
+*With income per week increasing 1 pound, the expenditure on gambling in pounds per year times exp(0.216)*
+
+*With verbal score increasing 1 unit, the expenditure on gambling in pounds per year times exp(-0.262)*
+2. Create a 95% confidence interval for each of the estimated coefficients and discuss how you would interpret this uncertainty.
+
+```{r}
+confint(model,level = 0.95)
+```
+*[1.57,4.56] contains the true intercept with 95% probability*
+
+*[-1.66,-0.08] contains the true coefficient of sex with 95% probability*
+
+*[0.05,0.98] contains the true coefficient of status_center with 95% probability*
+
+*[0.11,0.31] contains the true coefficient of income with 95% probability*
+
+*[-0.47,-0.05] contains the true coefficient of verbal with 95% probability*
+
+3. Predict the amount that a male with average status, income and verbal score would gamble along with an appropriate 95% CI.  Repeat the prediction for a male with maximal values of status, income and verbal score.  Which CI is wider and why is this result expected?
+
+```{r}
+prediction_average<-predict(object = model,newdata = data.frame(sex=0,status_center=0,income=mean(teengamb$income),verbal=mean(teengamb$verbal)),level = 0.95,interval  = "prediction")
+l1<-prediction_average[3]-prediction_average[2]
+prediction_max<-predict(object = model,newdata = data.frame(sex=0,status_center=max(teengamb$status)-mean(teengamb$status),income=max(teengamb$income),verbal=max(teengamb$verbal)),level = 0.95,interval  = "prediction")
+l2<-prediction_max[3]-prediction_max[2]
+l1
+l2
+```
+*Because the length of CI is* $2*\frac{s}{\sqrt{n}}*t_{\frac{\alpha}{2}}$
+*and for a male with maximal values of status, income and verbal score, the standard error* $s$ *is bigger than the* $s$ *of a male with average status, income and verbal score.*
+
+### School expenditure and test scores from USA in 1994-95
+
+```{r}
+data(sat)
+?sat
+```
+
+1. Fit a model with total sat score as the outcome and expend, ratio and salary as predictors.  Make necessary transformation in order to improve the interpretability of the model.  Interpret each of the coefficient.
+
+```{r}
+ratio_center = sat$ratio-mean(sat$ratio)
+salary_log = log(sat$salary)
+model<-lm(log(total)~ratio_center+log(salary),data=sat)
+summary(model)
+plot(model,which=1)
+```
+*The regression model is* $log(total)=7.619+0.003*ratio\_center-0.212*log(salary)$
+*With the average teacher ratio and 1 salary, the log(total) is 7.619*
+
+*With ratio increasing 1 unit, the total score will be exp(0.003) times of the original total score*
+
+*With log(salary) increasing 1 unit, the total score will be exp(-0.212) times of the original total score*
+
+2. Construct 98% CI for each coefficient and discuss what you see.
+
+```{r}
+confint(model,level = 0.98)
+```
+*[7.10,8.14] contains the true intercept with 98% probability*
+
+*[-0.0075,0.0137] contains the true coefficient of ratio_cneter with 98% probability*
+
+*[-0.36,-0.066] contains the true coefficient of log(salary) with 98% probability*
+
+3. Now add takers to the model.  Compare the fitted model to the previous model and discuss which of the model seem to explain the outcome better?
+
+```{r}
+model<-lm(log(total)~ratio_center+log(salary)+log(sat$taker),data=sat)
+summary(model)
+```
+*The $R^2$ of this regression is 0.88, which is bigger than the earlier regression, illustrating that the fittness of the regression adding log(takers) is better than the original model.*
+
+# Conceptual exercises.
+
+### Special-purpose transformations:
+
+For a study of congressional elections, you would like a measure of the relative amount of money raised by each of the two major-party candidates in each district. Suppose that you know the amount of money raised by each candidate; label these dollar values $D_i$ and $R_i$. You would like to combine these into a single variable that can be included as an input variable into a model predicting vote share for the Democrats.
+
+Discuss the advantages and disadvantages of the following measures:
+
+* The simple difference, $D_i-R_i$
+*Advantage: It is easy to interpret how the difference between money raised by two candidates can effect the result.*
+
+*Disadvantage: It can only indicate the effect of difference. For example, when* $D_i=200$,$R_i=100$, *the result is same with the situation in which* $ D_i=400$,$R_i=200$
+
+* The ratio, $D_i/R_i$
+*Advantage: It is easy to interpret how the ratio of money raised by two candidates can effect the result.*
+
+*Disadvantage: It can only indicate the effect of ratio. For example, when* $D_i=200$,$R_i=100$, *the result is same with the situation in which* $ D_i=400$,$R_i=200$
+
+* The difference on the logarithmic scale, $log D_i-log R_i$ 
+skewness
+*Advantage: It can decrease the right-skewness of data*
+
+*Disadvantage: It can only indicate the effect of ratio. For example, when* $D_i=200$,$R_i=100$, *the result is same with the situation in which* $ D_i=400$,$R_i=200$*
+
+* The relative proportion, $D_i/(D_i+R_i)$.
+*Advantage: It can indicate the effect of the relation between a candidate and the both tow candidates*
+
+*Disadvantage: It can only indicate the effect of relationship between a individual and the ensable. For example, when* $D_i=200$,$R_i=100$, *the result is same with the situation in which* $ D_i=400$,$R_i=200$*
+
+### Transformation 
+
+For observed pair of $\mathrm{x}$ and $\mathrm{y}$, we fit a simple regression model 
+$$\mathrm{y}=\alpha + \beta \mathrm{x} + \mathrm{\epsilon}$$ 
+which results in estimates $\hat{\alpha}=1$, $\hat{\beta}=0.9$, $SE(\hat{\beta})=0.03$, $\hat{\sigma}=2$ and $r=0.3$.
+
+1. Suppose that the explanatory variable values in a regression are transformed according to the $\mathrm{x}^{\star}=\mathrm{x}-10$ and that $\mathrm{y}$ is regressed on $\mathrm{x}^{\star}$.  Without redoing the regression calculation in detail, find $\hat{\alpha}^{\star}$, $\hat{\beta}^{\star}$, $\hat{\sigma}^{\star}$, and $r^{\star}$.  What happens to these quantities when $\mathrm{x}^{\star}=10\mathrm{x}$ ? When $\mathrm{x}^{\star}=10(\mathrm{x}-1)$?
+
+(a) $x^*=x-10$
+
+$y=\hat{\alpha}+\hat{\beta}(x^*+10)+\hat{\epsilon}$
+
+*so*
+$\hat{\alpha^*}=\hat{\alpha}+10*\hat{\beta}=10$
+
+$\hat{\beta^*}=\hat{\beta}=0.9$
+
+$\hat{\epsilon^*}=\hat{\epsilon}$--->$\hat{\sigma^*}=\hat{\sigma}=2$
+
+*becuase* $R^2=1-\frac{\sum(y_i-\hat{y_i})}{\sum(y_i-\bar{y})}$
+
+*and* $\hat{y_i}$ *wil not change* 
+
+*so*${R^2}^*=R^2$, $r^*=0.3$
+
+(b) $x^*=10x$
+$y=\hat{\alpha}+\hat{\beta}x^*/10+\hat{\epsilon}$
+
+*so*
+$\hat{\alpha^*}=\hat{\alpha}=1$
+
+$\hat{\beta^*}=\hat{\beta}/10=0.09$
+
+$\hat{\epsilon^*}=\hat{\epsilon}$--->$\hat{\sigma^*}=\hat{\sigma}=2$
+
+*and* $\hat{y_i}$ *wil not change* 
+
+*so* ${R^2}^*=R^2$,$r^*=0.3$
+
+(c) $x^*=10(x-1)$
+
+$y=\hat{\alpha}+\hat{\beta}+\hat{\beta}x^*/10+\hat{\epsilon}$
+
+*so*
+$\hat{\alpha^*}=\hat{\alpha}+\hat{\beta}=1.9$
+
+$\hat{\beta^*}=\hat{\beta}/10=0.09$
+
+$\hat{\epsilon^*}=\hat{\epsilon}$--->$\hat{\sigma^*}=\hat{\sigma}=2$
+
+*and* $\hat{y_i}$ *wil not change* 
+
+*so* ${R^2}^*=R^2$,$r^*=0.3$
+
+2. Now suppose that the response variable scores are transformed according to the formula
+$\mathrm{y}^{\star\star}= \mathrm{y}+10$ and that $\mathrm{y}^{\star\star}$ is regressed on $\mathrm{x}$.  Without redoing the regression calculation in detail, find $\hat{\alpha}^{\star\star}$, $\hat{\beta}^{\star\star}$, $\hat{\sigma}^{\star\star}$, and $r^{\star\star}$.  What happens to these quantities when $\mathrm{y}^{\star\star}=5\mathrm{y}$ ? When $\mathrm{y}^{\star\star}=5(\mathrm{y}+2)$?
+
+(a)$y^{**}=y+10$
+
+$y^{**}=\hat{\alpha}+10+\hat{\beta}x+\hat{\epsilon}$
+
+*so*
+$\hat{\alpha^{**}}=\hat{\alpha}+10=11$
+
+$\hat{\beta^{**}}=\hat{\beta}=0.9$
+
+$\hat{\epsilon^{**}}=\hat{\epsilon}$--->$\hat{\sigma^{**}}=\hat{\sigma}=2$
+
+*because* $\hat{y_i^{**}}=\hat{y_i}+10$ *and* $\bar{y_i^{**}}=\bar{y_i}+10$ *and* $R^2=1-\frac{\sum(y_i-\hat{y_i})}{\sum(y_i-\bar{y})}$
+
+*we can tell that* $\hat{{R^2}^{**}}=\hat{R^2}$,$r^{**}=0.3$
+
+(b)$y^{**}=5y$
+
+$y^{**}=5\hat{\alpha}+5\hat{\beta}+5\hat{\epsilon}$
+
+$\hat{\alpha^{**}}=5\hat{\alpha}=5$
+
+$\hat{\beta^{**}}=5\hat{\beta}=4.5$
+
+$\hat{\epsilon^{**}}=5\hat{\epsilon}$--->$\hat{\sigma^{**}}=5\hat{\sigma}=10$
+
+*because* $\hat{y_i^{**}}=5\hat{y_i}$ *and* $\bar{y_i^{**}}=5\bar{y_i}$ *and* $R^2=1-\frac{\sum(y_i-\hat{y_i})}{\sum(y_i-\bar{y})}$
+
+*we can tell that* $\hat{{R^2}^{**}}=\hat{R^2}$,$r^{**}=0.3$
+
+(c)$y^{**}=5(y+2)$
+
+$y^{**}=5\hat{\alpha}+10+5\hat{\beta}+5\hat{\epsilon}$
+
+$\hat{\alpha^{**}}=5\hat{\alpha}+10=15$
+
+$\hat{\beta^{**}}=5\hat{\beta}=4.5$
+
+$\hat{\epsilon^{**}}=5\hat{\epsilon}$--->$\hat{\sigma^{**}}=5\hat{\sigma}=10$
+
+*because* $\hat{y_i^{**}}=5\hat{y_i}+10$ *and* $\bar{y_i^{**}}=5\bar{y_i}+10$ *and* $R^2=1-\frac{\sum(y_i-\hat{y_i})}{\sum(y_i-\bar{y})}$
+
+*we can tell that* $\hat{{R^2}^{**}}=\hat{R^2}$,$r^{**}=0.3$
+
+3. In general, how are the results of a simple regression analysis affected by linear transformations of $\mathrm{y}$ and $\mathrm{x}$?
+
+*linear transformations of* $\mathrm{x}$ *do not affect* $\epsilon$ *and* $R^2$
+
+$\mathrm{x}+c$ *will result the intercept change to* $\hat{\alpha}-c\hat{\beta}$, *and* $\hat{\beta}$ *do not change*
+
+$\mathrm{x}*d$ *will result the* $\hat{\beta}$ *change to* $\hat{\beta}/d$, *and* $\hat{\alpha}$ *do not change*
+
+*linear transformations of* $\mathrm{y}$ *do not affect* $R^2$
+
+$\mathrm{y}+c$ *will result the intercept change to* $\hat{\alpha}+c$, *and* $\hat{\beta}$ *do not change*
+
+$\mathrm{x}*d$ *will result the* $\hat{\alpha}$ *change to* $\hat{\alpha}*d$, *and* $\hat{\beta}$ *will change to* $\hat{\beta}*d$,*and* $\hat{\sigma}$ *will change to* $\hat{\sigma}*5$
+
+4. Suppose that the explanatory variable values in a regression are transformed according to the $\mathrm{x}^{\star}=10(\mathrm{x}-1)$ and that $\mathrm{y}$ is regressed on $\mathrm{x}^{\star}$.  Without redoing the regression calculation in detail, find $SE(\hat{\beta}^{\star})$ and $t^{\star}_0= \hat{\beta}^{\star}/SE(\hat{\beta}^{\star})$.
+
+$\hat{\beta^*}=\hat{\beta}/10$
+
+$SE(\hat{\beta^*})=SE(\hat{\beta})/10=0.003$
+
+$t_0^*=t_0=30$
+
+5. Now suppose that the response variable scores are transformed according to the formula
+$\mathrm{y}^{\star\star}=5(\mathrm{y}+2)$ and that $\mathrm{y}^{\star\star}$ is regressed on $\mathrm{x}$.  Without redoing the regression calculation in detail, find $SE(\hat{\beta}^{\star\star})$ and $t^{\star\star}_0= \hat{\beta}^{\star\star}/SE(\hat{\beta}^{\star\star})$.
+
+$y^{**}=5(y+2)$
+
+$\hat{\beta^{**}}=5\hat{\beta}$
+
+$SE(\hat{\beta^*})=5*SE(\hat{\beta})=0.15$
+
+$t_0^{**}=t_0=30$
+
+6. In general, how are the hypothesis tests and confidence intervals for $\beta$ affected by linear transformations of $\mathrm{y}$ and $\mathrm{x}$?
+
+(a)
+$\frac{\bar{\beta}-\mu_0}{SE(\beta)}$~$t(n-1)$
+
+*Confidence Interval is* $[\bar{\beta}-t_{\alpha/2}*SE(\beta),\bar{\beta}+t_{\alpha/2}*SE(\beta)]$
+
+*We can tell that both addition or substraction on x or y will not change the CI*
+
+*And if* $x^*=c*x$, *then* $\bar{\beta^*}=\bar{\beta}/c$, *CI is* $[\bar{\beta}/c-t_{\alpha/2}*SE(\beta)/c,\bar{\beta}/c+t_{\alpha/2}*SE(\beta)/c]$
+
+*If* $y^*=d*y$, *then* $\bar{\beta^*}=\bar{\beta}*d$, *CI is* $[\bar{\beta}*d-t_{\alpha/2}*SE(\beta)*d,\bar{\beta}*d+t_{\alpha/2}*SE(\beta)*d]$	
+
+(b)
+*In hypothesis test,* $H_0$:$\mu=0$, $H_1$:$\mu\neq0$
+
+$T=\frac{\bar{\beta}}{SE(\beta)}$~$t(n-1)$
+
+*We can tell that both addition or substraction on x or y will not change T so that will not change the result of test.*
+
+*And if* $x^*=c*x$, *then* $\bar{\beta^*}=\bar{\beta}/c$,$T$ *does not change.*
+
+*If* $y^*=d*y$, *then* $\bar{\beta^*}=\bar{\beta}*d$,$T$ *does not change*
+
+# Feedback comments etc.
+
+If you have any comments about the homework, or the class, please write your feedback here.  We love to hear your opinions.
+
