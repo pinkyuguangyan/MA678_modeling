@@ -118,10 +118,21 @@ experimental data from the National Supported Work example are available in the 
 - re74, re75, re78: real earnings in 1974, 1975 and 1978
 - educ_cat = 4 category education variable (1=<hs, 2=hs, 3=sm college, 4=college)
 
-```{r, echo=FALSE}
+```{r}
 lalonde<-read.dta("http://www.stat.columbia.edu/~gelman/arm/examples/lalonde/NSW.dw.obs.dta")
+lalonde$re78 = (lalonde$re78 - mean(lalonde$re78)) / sd(lalonde$re78)
+tobit = vglm(re78 ~ educ + factor(treat) + factor(black) + factor(married) + age, tobit(Upper = 121174), data = lalonde)
+summary(tobit)
 ```
+*educ: With every 1 level increase in education level, one's average earning on 1978 would increase by 0.08 while holding all other variables in the model constant.*
 
+*treat: If someone from NSW group, one's average earning on 1978 would be -0.53 lower than someone with the all same condition who from CPS or PSID group.*
+
+*balck: If someone is black, one's average earning on 1978 would be -0.15 lower than someone with the all same condition who is not black.*
+
+*married: If someone is married, one's average earning on 1978 would be 0.53 higher than someone with the all same condition who is not married.*
+
+*age: With every 1 increase in the age, one's average earning on 1978 would increase by 0.012 while holding all other variables in the model constant.*
 
 # Robust linear regression using the t model: 
 The csv file `congress` has the votes for the Democratic and Republican candidates in each U.S. congressional district in between 1896 and 1992, along with the parties' vote proportions and an indicator for whether the incumbent was running for reelection. 
